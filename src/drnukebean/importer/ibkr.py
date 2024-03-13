@@ -44,6 +44,7 @@ class IBKRImporter(importer.ImporterProtocol):
                  divSuffix='Div',  # suffix for dividend Account , like Assets:Invest:IB:VT:Div
                  DividendsAccount=None,
                  interestSuffix='Interest',
+                 optionsSuffix='Premiums',
                  WHTAccount=None,
                  FeesSuffix='Fees',
                  FeesAccount=None,
@@ -61,6 +62,7 @@ class IBKRImporter(importer.ImporterProtocol):
         self.DividendsAccount = DividendsAccount
         self.WHTAccount = WHTAccount
         self.interestSuffix = interestSuffix
+        self.optionsSuffix = optionsSuffix
         self.FeesSuffix = FeesSuffix
         self.FeesAccount = FeesAccount
         self.PnLSuffix = PnLSuffix
@@ -86,6 +88,9 @@ class IBKRImporter(importer.ImporterProtocol):
         return ':'.join([self.Mainaccount, currency])
 
     def mapSymbol(self, symbol):
+        # replace multiple spaces in options name with single dash
+        if ' ' in symbol:
+            symbol = re.sub(r'\s+', '-', symbol)
         return self.symbolMap.get(symbol, symbol)
 
     def getDivIncomeAcconut(self, currency, symbol):
@@ -99,6 +104,9 @@ class IBKRImporter(importer.ImporterProtocol):
     def getInterestIncomeAcconut(self, currency):
         # Income:Invest:IB:USD
         return ':'.join([self.Mainaccount.replace('Assets', 'Income'), self.interestSuffix, currency])
+
+    def getOptionsIncomeAccount(self, symbol):
+        return ':'.join([self.Mainaccount.replace('Assets', 'Income'), symbol, self.optionsSuffix])
 
     def getAssetAccount(self, symbol):
         # Assets:Invest:IB:VTI
@@ -414,12 +422,80 @@ class IBKRImporter(importer.ImporterProtocol):
             return []
         # forex transactions
         fx = tr[tr['symbol'].apply(isForex)]
+        # options transactions
+        options = tr[tr['symbol'].apply(isOption)]
         # Stocks transactions
-        stocks = tr[~tr['symbol'].apply(isForex)]
+        stocks = tr[~tr['symbol'].apply(isForex) & ~tr['symbol'].apply(
+            isOption)]
 
         trTransactions = self.Forex(fx) + self.Stocktrades(stocks)
 
         return trTransactions
+
+    def Options(self, options):
+        # returns beancount transactions for IBKR options transactions
+        optionTransactions = []
+
+        # for now only work on the last entry
+        options = options.iloc[-1:]
+        print(options)
+
+        for idx, row in options.iterrows():
+            symbol = self.mapSymbol(row['symbol'])
+            description = row['description']
+            quantity = amount.Amount(row['quantity'], symbol)
+            price = amount.Amount(row['proceeds'], row['currency'])
+            price_per = amount.Amount(row['tradePrice'], row['currency'])
+            date = row['tradeDate']
+            currency_IBcommision = row['ibCommissionCurrency']
+            commission = amount.Amount(
+                round(row['ibCommission'], 2), currency_IBcommision)
+            buysell = row['buySell'].name
+
+
+            cost = position.CostSpec(
+                number_per=None,#price.number,
+                number_total=None,
+                currency=None,#price.currency,
+                date=None,#date,
+                label=None,
+                merge=False)
+
+            postings = [
+                data.Posting(self.getAssetAccount(symbol),
+                             quantity, cost, None, None, None),
+                data.Posting(self.getOptionsIncomeAccount(symbol),
+                             None, None, None, None, None),
+                data.Posting(self.getLiquidityAccount(row['currency']),
+                             price, None, None, None, None),
+                data.Posting(self.getLiquidityAccount(currency_IBcommision),
+                             commission, None, None, None, None),
+                data.Posting(self.getFeesAccount(currency_IBcommision),
+                             minus(commission), None, None, None, None)
+            ]
+            print(postings)
+
+            print(symbol)
+            print(quantity)
+            print(price)
+            print("date:", date)
+            print(commission)
+            print(buysell)
+            optionTransactions.append(
+                data.Transaction(data.new_metadata('Buy', 0),
+                                 date,
+                                 self.flag,
+                                 description,     # payee
+                                 ' '.join(
+                                     [buysell, quantity.to_string(), '@', price_per.to_string()]),
+                                 data.EMPTY_SET,
+                                 data.EMPTY_SET,
+                                 postings
+                                 )
+            )
+
+        print("\n\ndone")
+        return optionTransactions
 
     def Forex(self, fx):
         # returns beancount transactions for IBKR forex transactions
@@ -661,6 +737,13 @@ def isForex(symbol):
     else:
         return True
 
+def isOption(symbol):
+    # returns True if a transaction is an option transaction
+    b = re.search("\w+\s+\d+", symbol)
+    if b == None:
+        return False
+    else:
+        return True
 
 def getForexCurrencies(symbol):
     b = re.search("(\w{3})[.](\w{3})", symbol)
