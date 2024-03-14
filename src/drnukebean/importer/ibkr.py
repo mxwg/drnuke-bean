@@ -20,7 +20,7 @@ import logging
 import yaml
 from os import path
 from ibflex import client, parser, Types
-from ibflex.enums import CashAction, BuySell
+from ibflex.enums import CashAction, BuySell, Code
 from ibflex.client import ResponseCodeError
 
 from beancount.query import query
@@ -436,15 +436,20 @@ class IBKRImporter(importer.ImporterProtocol):
         # returns beancount transactions for IBKR options transactions
         optionTransactions = []
 
-        # for now only work on the last entry
-        options = options.iloc[-1:]
-        print(options)
-
+        partialTxns = {}
         for idx, row in options.iterrows():
+            # if the current transaction is partial,
+            # put it in the open txns list if that does not contain
+            # a transaction with the same id yet
+            txnType = row['openCloseIndicator'].name.lower()
+
+
             symbol = self.mapSymbol(row['symbol'])
             description = row['description']
             quantity = amount.Amount(row['quantity'], symbol)
-            price = amount.Amount(row['proceeds'], row['currency'])
+            # price = amount.Amount(row['proceeds'], row['currency'])
+            raw_price = row['tradePrice'] * abs(quantity.number) * 100
+            price = amount.Amount(raw_price, row['currency'])
             price_per = amount.Amount(row['tradePrice'], row['currency'])
             date = row['tradeDate']
             currency_IBcommision = row['ibCommissionCurrency']
@@ -452,14 +457,42 @@ class IBKRImporter(importer.ImporterProtocol):
                 round(row['ibCommission'], 2), currency_IBcommision)
             buysell = row['buySell'].name
 
+            if Code.PARTIAL in row['notes']:
+                if row['ibOrderID'] in partialTxns:
+                    print("using existing partial")
+                    partialTxn = partialTxns[row['ibOrderID']]
+                    existingPrice = partialTxn['price']
+                    existingQuantity = partialTxn['quantity']
+                    existingCommission = partialTxn['commission']
+                    price = amount.Amount(price.number + existingPrice.number, price.currency)
+                    quantity = amount.Amount(quantity.number + existingQuantity.number, quantity.currency)
+                    commission = amount.Amount(commission.number + existingCommission.number, commission.currency)
+                    del partialTxns[row['ibOrderID']]
+                else:
+                    partialTxns[row['ibOrderID']] = {
+                        "price": price,
+                        "quantity": quantity,
+                        "commission": commission
+                    }
+                    continue
 
-            cost = position.CostSpec(
-                number_per=None,#price.number,
-                number_total=None,
-                currency=None,#price.currency,
-                date=None,#date,
-                label=None,
-                merge=False)
+
+            if 'close' == txnType:
+                cost = position.CostSpec(
+                    number_per=None,
+                    number_total=None,
+                    currency=None,
+                    date=None,
+                    label=None,
+                    merge=False)
+            if 'open' == txnType:
+                cost = position.CostSpec(
+                    number_per=price.number,
+                    number_total=None,
+                    currency=price.currency,
+                    date=date,
+                    label=None,
+                    merge=False)
 
             postings = [
                 data.Posting(self.getAssetAccount(symbol),
@@ -473,28 +506,21 @@ class IBKRImporter(importer.ImporterProtocol):
                 data.Posting(self.getFeesAccount(currency_IBcommision),
                              minus(commission), None, None, None, None)
             ]
-            print(postings)
 
-            print(symbol)
-            print(quantity)
-            print(price)
-            print("date:", date)
-            print(commission)
-            print(buysell)
             optionTransactions.append(
                 data.Transaction(data.new_metadata('Buy', 0),
                                  date,
                                  self.flag,
                                  description,     # payee
                                  ' '.join(
-                                     [buysell, quantity.to_string(), '@', price_per.to_string()]),
+                                     [buysell,'to',txnType, quantity.to_string(),
+                                      '@', price_per.to_string()]),
                                  data.EMPTY_SET,
                                  data.EMPTY_SET,
                                  postings
                                  )
             )
 
-        print("\n\ndone")
         return optionTransactions
 
     def Forex(self, fx):
