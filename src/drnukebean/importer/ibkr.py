@@ -48,6 +48,7 @@ class IBKRImporter(importer.ImporterProtocol):
                  WHTAccount=None,
                  FeesSuffix='Fees',
                  FeesAccount=None,
+                 OptionPremiumsAccount=None,
                  PnLSuffix='PnL',
                  fpath=None,  #
                  depositAccount='',
@@ -65,6 +66,7 @@ class IBKRImporter(importer.ImporterProtocol):
         self.optionsSuffix = optionsSuffix
         self.FeesSuffix = FeesSuffix
         self.FeesAccount = FeesAccount
+        self.OptionPremiumsAccount = OptionPremiumsAccount
         self.PnLSuffix = PnLSuffix
         self.filepath = fpath             # optional file path specification,
         # if flex query should not be used online (loading time...)
@@ -106,7 +108,10 @@ class IBKRImporter(importer.ImporterProtocol):
         return ':'.join([self.Mainaccount.replace('Assets', 'Income'), self.interestSuffix, currency])
 
     def getOptionsIncomeAccount(self, symbol):
-        return ':'.join([self.Mainaccount.replace('Assets', 'Income'), symbol, self.optionsSuffix])
+        if self.OptionPremiumsAccount:
+            return self.OptionPremiumsAccount
+        else:
+            return ':'.join([self.Mainaccount.replace('Assets', 'Income'), symbol, self.optionsSuffix])
 
     def getAssetAccount(self, symbol):
         # Assets:Invest:IB:VTI
