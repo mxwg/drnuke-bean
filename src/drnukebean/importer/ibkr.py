@@ -508,12 +508,12 @@ class IBKRImporter(importer.ImporterProtocol):
             ]
 
             optionTransactions.append(
-                data.Transaction(data.new_metadata('Buy', 0),
+                data.Transaction(data.new_metadata(buysell.capitalize(), 0),
                                  date,
                                  self.flag,
                                  description,     # payee
-                                 ' '.join(
-                                     [buysell,'to',txnType, quantity.to_string(),
+                                 ' '.join([buysell, 'to', txnType,
+                                      quantity.to_string(),
                                       '@', price_per.to_string()]),
                                  data.EMPTY_SET,
                                  data.EMPTY_SET,
