@@ -446,7 +446,7 @@ class IBKRImporter(importer.ImporterProtocol):
         stocks = tr[~tr['symbol'].apply(isForex) & ~tr['symbol'].apply(
             isOption)]
 
-        trTransactions = self.Forex(fx) + self.Stocktrades(stocks)
+        trTransactions = self.Forex(fx) + self.Stocktrades(stocks) + self.Options(options)
 
         return trTransactions
 
@@ -465,9 +465,7 @@ class IBKRImporter(importer.ImporterProtocol):
             symbol = self.mapSymbol(row['symbol'])
             description = row['description']
             quantity = amount.Amount(row['quantity'], symbol)
-            # price = amount.Amount(row['proceeds'], row['currency'])
-            raw_price = row['tradePrice'] * abs(quantity.number) * 100
-            price = amount.Amount(raw_price, row['currency'])
+            price = amount.Amount(row['proceeds'], row['currency'])
             price_per = amount.Amount(row['tradePrice'], row['currency'])
             date = row['tradeDate']
             currency_IBcommision = row['ibCommissionCurrency']
