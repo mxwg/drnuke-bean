@@ -477,7 +477,6 @@ class IBKRImporter(importer.ImporterProtocol):
 
             if Code.PARTIAL in row['notes']:
                 if row['ibOrderID'] in partialTxns:
-                    print("using existing partial")
                     partialTxn = partialTxns[row['ibOrderID']]
                     existingPrice = partialTxn['price']
                     existingQuantity = partialTxn['quantity']
