@@ -244,10 +244,20 @@ class IBKRImporter(importer.ImporterProtocol):
         else:
             deps = []
 
+        # get witholding tax on interest
+        wht_interest = wht[wht['description'].str.contains('ON CREDIT', case=False)]
+        wht_interest = wht_interest[['currency', 'description', 'reportDate', 'amount']]
+
         int_ = ct[ct['type'].map(lambda t: t == CashAction.BROKERINTRCVD
                                  or t == CashAction.BROKERINTPAID)]     # interest only
-        if len(int_) > 0:
-            ints = self.Interest(int_)
+
+        # merge interest with witholding tax
+        int_match = pd.merge(
+            int_, wht_interest, on=['reportDate', 'currency'], suffixes=('', '_wht')
+        )
+
+        if len(int_match) > 0:
+            ints = self.Interest(int_match)
         else:
             ints = []
 
@@ -363,6 +373,7 @@ class IBKRImporter(importer.ImporterProtocol):
         for idx, row in int_.iterrows():
             currency = row['currency']
             amount_ = amount.Amount(row['amount'], currency)
+            amount_wht = amount.Amount(row['amount_wht'], currency)
             text = row['description']
             month = re.findall('\w{3}-\d{4}', text)[0]
 
@@ -370,8 +381,10 @@ class IBKRImporter(importer.ImporterProtocol):
             # received and paid interests are booked on the same account
             postings = [data.Posting(self.getInterestIncomeAcconut(currency),
                                      -amount_, None, None, None, None),
+                        data.Posting(self.WHTAccount,
+                                     -amount_wht, None, None, None, None),
                         data.Posting(self.getLiquidityAccount(currency),
-                                     amount_, None, None, None, None)
+                                     None, None, None, None, None)
                         ]
             meta = data.new_metadata('Interest', 0)
             intTransactions.append(
@@ -379,7 +392,7 @@ class IBKRImporter(importer.ImporterProtocol):
                                  row['reportDate'],
                                  self.flag,
                                  'IB',     # payee
-                                 ' '.join(['Interest ', currency, month]),
+                                 ' '.join(['Interest', currency, month]),
                                  data.EMPTY_SET,
                                  data.EMPTY_SET,
                                  postings
