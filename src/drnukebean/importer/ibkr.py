@@ -502,7 +502,7 @@ class IBKRImporter(importer.ImporterProtocol):
                     merge=False)
             if 'open' == txnType:
                 cost = position.CostSpec(
-                    number_per=price.number,
+                    number_per=abs(price.number),
                     number_total=None,
                     currency=price.currency,
                     date=date,
